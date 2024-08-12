@@ -9,7 +9,10 @@ const char* password = WIFI_PASSWORD;
 
 WebServer server(80);
 
-IPAddress ip;
+IPAddress static_ip(STATIC_IP);
+IPAddress gateway(GATEWAY);
+IPAddress subnet(SUBNET);
+
 String hubState = "PC";
 const int switchPin = 35;  // GPIO5 on Wemos S2 Mini
 const int monitorPin = 39; // GPIO4 on Wemos S2 Mini for monitoring channel state
@@ -65,7 +68,7 @@ void handleRoot() {
   html += "<script>function updateState() {fetch('/state').then(response => response.text()).then(state => {document.getElementById('state').innerText = state;document.getElementById('switchButton').innerText = 'Switch to ' + (state === 'PC' ? 'Mac' : 'PC');});} setInterval(updateState, 2000);</script>";
   html += "</head><body>";
   html += "<h1>USB Hub Switch</h1>";
-  html += "<h2>Current IP: <span id='ipState'>" + ip.toString() + "</span></h2>";
+  html += "<h2>Current IP: <span id='ipState'>" + static_ip.toString() + "</span></h2>";
   html += "<p>Current State: <span id='state'>" + hubState + "</span></p>";
   html += String("<a href='/switch' id='switchButton'>Switch to ") + (hubState == "PC" ? "Mac" : "PC") + "</a>";
   html += "</body></html>";
@@ -90,7 +93,7 @@ void printWifiStatus() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
-        Serial.println(ip.toString());
+        Serial.println(static_ip.toString());
     } else if (WiFi.status() == WL_NO_SHIELD) {
         Serial.println("WiFi shield not present");
     } else {
@@ -118,6 +121,14 @@ void setup() {
   digitalWrite(switchPin, HIGH);
   pinMode(monitorPin, INPUT_PULLUP);
 
+   // Set hostname
+  WiFi.setHostname(HOSTNAME);
+
+  // Configure static IP
+  if (!WiFi.config(static_ip, gateway, subnet)) {
+    Serial.println("STA Failed to configure");
+  }
+
   // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   int wifiConnectAttempts = 0;
@@ -133,11 +144,13 @@ void setup() {
       while(1) { delay(1000); } // Infinite loop to prevent further execution
     }
   }
+  
   Serial.println("");
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  ip = WiFi.localIP();
-  Serial.println(ip.toString());
+  Serial.print("Hostname: ");
+  Serial.println(WiFi.getHostname());
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
   // Initialize hubState based on current channel
   updateHubState();

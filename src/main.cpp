@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include "env.h"
+#include "env.h" // Create this file in your project directory and add your WiFi credentials
 
 // Replace with your network credentials
 const char* ssid = WIFI_SSID;

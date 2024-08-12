@@ -14,25 +14,39 @@ const int switchPin = 35;  // GPIO5 on Wemos S2 Mini
 const int monitorPin = 39; // GPIO4 on Wemos S2 Mini for monitoring channel state
 
 const unsigned long DEBOUNCE_DELAY = 50; // milliseconds
+const unsigned long STATE_CHANGE_THRESHOLD = 1000; // milliseconds
 unsigned long lastDebounceTime = 0;
-int lastMonitorState = LOW; 
+unsigned long lastStateChangeTime = 0;
+int lastSteadyState = LOW;
+int lastFlickerableState = LOW;
+int currentState;
 
 void updateHubState() {
-  int reading = digitalRead(monitorPin);
+  currentState = digitalRead(monitorPin);
   
-  if (reading != lastMonitorState) {
+  // If the switch changed, due to noise or pressing:
+  if (currentState != lastFlickerableState) {
     lastDebounceTime = millis();
-    Serial.println("State change detected: " + String(reading));
+    lastFlickerableState = currentState;
   }
 
   if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
-    if (reading != (hubState == "PC" ? LOW : HIGH)) {
-      hubState = (reading == LOW) ? "PC" : "Mac";
-      Serial.println("Hub state changed to: " + hubState);
+    // Whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+    if (currentState != lastSteadyState) {
+      lastSteadyState = currentState;
+      
+      // Check if the state has been steady for the threshold duration
+      if ((millis() - lastStateChangeTime) > STATE_CHANGE_THRESHOLD) {
+        String newState = (currentState == LOW) ? "PC" : "Mac";
+        if (hubState != newState) {
+          hubState = newState;
+          lastStateChangeTime = millis();
+          Serial.println("Hub state changed to: " + hubState);
+        }
+      }
     }
   }
-
-  lastMonitorState = reading;
 }
 
 void switchHub() {

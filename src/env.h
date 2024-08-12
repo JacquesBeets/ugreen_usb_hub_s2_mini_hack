@@ -1,6 +1,6 @@
 // wifi const variables
-#define WIFI_SSID "WiFi-SSID"
-#define WIFI_PASSWORD "WiFi-Password"
+#define WIFI_SSID "BeetsDeBeer"
+#define WIFI_PASSWORD "831126jac"
 
 // mqtt const variables
 #define MQTT_SERVER "192.168.1.10"

@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include "env.h"
 
 // Replace with your network credentials
-const char* ssid     = "";
-const char* password = "";
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 WebServer server(80);
 

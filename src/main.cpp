@@ -3,9 +3,10 @@
 #include <WiFiClient.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
+#include <PubSubClient.h>
 #include "env.h" // Create this file in your project directory and add your WiFi credentials - this is not very secure as it will be included in your build automatically so be careful
 
-// Replace with your network credentials
+// WIFI IMPORTS
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
@@ -15,6 +16,16 @@ IPAddress static_ip(STATIC_IP);
 IPAddress gateway(GATEWAY);
 IPAddress subnet(SUBNET);
 
+// MQTT IMPORTS
+const char* mqtt_broker = MQTT_BROKER;
+const int mqtt_port = MQTT_PORT;
+const char* mqtt_username = MQTT_USERNAME;
+const char* mqtt_password = MQTT_PASSWORD;
+
+WiFiClient espClient;
+PubSubClient pubsubClient(espClient);
+
+// HUB IMPORTS
 String hubState = "PC";
 const int switchPin = 35;  // GPIO5 on Wemos S2 Mini
 const int monitorPin = 39; // GPIO4 on Wemos S2 Mini for monitoring channel state
@@ -157,6 +168,52 @@ void elegantOTACallbackInit(void) {
   ElegantOTA.onEnd(onOTAEnd);
 }
 
+
+// =============================================================================
+// MQTT
+// =============================================================================
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  
+  if (String(topic) == "usb_hub/switch") {
+    if (message == "PC" && hubState != "PC") {
+      switchHub();
+    } else if (message == "Mac" && hubState != "Mac") {
+      switchHub();
+    }
+  }
+}
+
+void reconnect() {
+  while (!pubsubClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "ESP32Client-" + String(random(0xffff), HEX);
+    if (pubsubClient.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("connected");
+      pubsubClient.subscribe("usb_hub/switch");
+      pubsubClient.publish("usb_hub/state", hubState.c_str());
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(pubsubClient.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void publishState() {
+  static String lastPublishedState = "";
+  if (hubState != lastPublishedState) {
+    pubsubClient.publish("usb_hub/state", hubState.c_str(), true);
+    lastPublishedState = hubState;
+  }
+}
+
+
 // =============================================================================
 // Setup
 // =============================================================================
@@ -218,6 +275,8 @@ void setup() {
   ElegantOTA.begin(&server);    // Start ElegantOTA
   elegantOTACallbackInit();
   server.begin();
+  pubsubClient.setServer(mqtt_broker, mqtt_port);
+  pubsubClient.setCallback(callback);
 }
 
 void loop() {
@@ -227,7 +286,10 @@ void loop() {
     Serial.println("WiFi connection lost. Reconnecting...");
     WiFi.reconnect();
   }
-
+  if (!pubsubClient.connected()) {
+    reconnect();
+  }
+  pubsubClient.loop();
   updateHubState();
   printWifiStatus();
   // blinkLED();

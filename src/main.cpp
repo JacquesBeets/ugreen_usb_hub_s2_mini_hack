@@ -65,6 +65,7 @@ void switchHub() {
 
 void handleRoot() {
   String html = "<html><head>";
+  html += "<title>UGreen USB Switch</title>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<style>body{font-family: Arial; text-align: center; color: #ffffff; background:#000000; padding: 5rem;} #switchButton{background-color: #4CAF50; border: none; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; text-decoration: none; font-size: 16px; margin: 4px 2px; cursor: pointer;}</style>";
   html += "<script>function updateState() {fetch('/state').then(response => response.text()).then(state => {document.getElementById('state').innerText = state;document.getElementById('switchButton').innerText = 'Switch to ' + (state === 'PC' ? 'Mac' : 'PC');});} setInterval(updateState, 2000);</script>";
@@ -106,11 +107,19 @@ void printWifiStatus() {
 
 }
 
-void blinkLED() {
-    digitalWrite(15, HIGH);
-    delay(1000);
-    digitalWrite(15, LOW);
-    delay(1000);
+void ledOn() {
+  digitalWrite(15, HIGH);
+}
+
+void ledOff() {
+  digitalWrite(15, LOW);
+}
+
+void blinkLED(int delayTime = 1000) {
+    ledOn();
+    delay(delayTime);
+    ledOff();
+    delay(delayTime);
 }
 
 // =============================================================================
@@ -119,6 +128,7 @@ void blinkLED() {
 void onOTAStart() {
   // Log when OTA has started
   Serial.println("OTA update started!");
+  blinkLED();
 }
 
 unsigned long ota_progress_millis = 0;
@@ -127,7 +137,6 @@ void onOTAProgress(size_t current, size_t final) {
   if (millis() - ota_progress_millis > 1000) {
     ota_progress_millis = millis();
     Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
-    blinkLED();
   }
 }
 
@@ -135,8 +144,10 @@ void onOTAEnd(bool success) {
   // Log when OTA has finished
   if (success) {
     Serial.println("OTA update finished successfully!");
+    blinkLED();
   } else {
     Serial.println("There was an error during OTA update!");
+    blinkLED(500);
   }
 }
 

@@ -83,7 +83,10 @@ void handleState() {
   server.send(200, "text/plain", hubState);
 }
 
+unsigned long lastPrintTime = 0;
 void printWifiStatus() {
+  // print the ip address ever 30 seconds
+  if ((millis() - lastPrintTime) > 30000) {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
@@ -93,6 +96,9 @@ void printWifiStatus() {
     } else {
         Serial.println("WiFi disconnected");
     }
+    lastPrintTime = millis();
+  }
+
 }
 
 void blinkLED() {
@@ -148,7 +154,7 @@ void loop() {
     WiFi.reconnect();
   }
   updateHubState();
-  // printWifiStatus();
+  printWifiStatus();
   // blinkLED();
   server.handleClient();
 }

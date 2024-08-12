@@ -1,10 +1,15 @@
-// wifi const variables
-#define WIFI_SSID "BeetsDeBeer"
-#define WIFI_PASSWORD "831126jac"
+#ifndef ENV_H
+#define ENV_H
 
-// mqtt const variables
-#define MQTT_SERVER "192.168.1.10"
-#define MQTT_PORT 1883
-#define MQTT_USER "mqtt-user"
-#define MQTT_PASS "mqtt-password"
-#define MQTT_TOPIC "home/livingroom"
+// wifi const variables
+#define WIFI_SSID "YourWiFiSSID"
+#define WIFI_PASSWORD "YourWiFiPassword"
+
+// Static IP configuration
+#define STATIC_IP 192,168,0,40  // Change this to your desired static IP
+#define GATEWAY 192,168,0,1      // Your router's IP address
+#define SUBNET 255,255,255,0     // Subnet mask
+
+#define HOSTNAME "UGreenUSBHubSwitch"  // Custom hostname for your device
+
+#endif // ENV_H

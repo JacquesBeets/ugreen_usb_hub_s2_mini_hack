@@ -223,13 +223,11 @@ void createDiscoveryUniqueID() {
 
 void haDiscovery() {
   char topic[128];
-  if (auto_discovery) {
-    char buffer1[512];
-    // char buffer2[512];
-    char uid[128];
-    DynamicJsonDocument doc(1024);
-    doc.clear();
-    Serial.println("Discovering new devices...");
+  char buffer1[512];
+  char uid[128];
+  DynamicJsonDocument doc(1024);
+  doc.clear();
+  Serial.println("Discovering new devices...");
 
 
     Serial.println("Adding Hub switch...");
@@ -258,21 +256,18 @@ void haDiscovery() {
     device["mf"] = "DIY";
     device["mdl"] = "ESP32";
     serializeJson(doc, buffer1);   
-    // Print to Serial for debugging
-    Serial.print("Content-Length: ");
-    Serial.println(measureJson(doc));
-    Serial.println(buffer1);
-    Serial.println(topic);
+
     //Publish discovery topic and payload (with retained flag)
     pubsubClient.publish(topic, buffer1, true);    
    
     Serial.println("All devices added!");
+}
 
-  } else {
-
+void haRemoveDevice() {
     //Remove all entities by publishing empty payloads
     //Must use original topic, so recreate from original Unique ID
     //This will immediately remove/delete the device/entities from HA
+    char topic[128];
     Serial.println("Removing discovered devices...");
     strcpy(topic, "homeassistant/switch/");
     strcat(topic, devUniqueID);
@@ -280,7 +275,6 @@ void haDiscovery() {
     pubsubClient.publish(topic, "");
 
     Serial.println("Devices Removed...");
-  }
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -316,7 +310,6 @@ void reconnect() {
     }
   }
 }
-
 
 void publishState() {
   pubsubClient.publish(mqtt_state_topic, hubState.c_str(), true);

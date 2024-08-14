@@ -30,24 +30,13 @@ const char* mqtt_password = MQTT_PASSWORD;
 WiFiClient espClient;
 PubSubClient pubsubClient(espClient);
 
-// MQTT Topics
-
-//Auto-discover enable/disable option
-bool auto_discovery = false;
-//Variables for creating unique entity IDs and topics
-byte macAddr[6];                  //Device MAC address
-char uidPrefix[] = "rctdev";      //Prefix for unique ID generation (limit to 20 chars)
-char devUniqueID[30];             //Generated Unique ID for this device (uidPrefix + last 6 MAC characters) 
-
-const char* mqtt_discovery_prefix = "homeassistant";
-const char* mqtt_device_name = "usb_hub_switch";
-const char* mqtt_switch_topic = "cmnd/usb_hub_switch/switch";
-const char* mqtt_state_topic = "stat/usb_hub_switch/state";
-
 // HUB IMPORTS
 String hubState = "PC";
 const int switchPin = 35;  // GPIO5 on Wemos S2 Mini
 const int monitorPin = 39; // GPIO4 on Wemos S2 Mini for monitoring channel state
+
+//Auto-discover enable/disable option
+bool auto_discovery = false;
 
 const unsigned long DEBOUNCE_DELAY = 50; // milliseconds
 const unsigned long STATE_CHANGE_THRESHOLD = 1000; // milliseconds
@@ -110,8 +99,8 @@ void handleRoot() {
   html += "<p>Current State: <span id='state'>" + hubState + "</span></p>";
   html += String("<a href='/switch' id='switchButton'>Switch to ") + (hubState == "PC" ? "Mac" : "PC") + "</a><br/><br/>";
   html += String("<h2>Auto Discovery: <span id='ipState'>") + (auto_discovery ? "ON" : "OFF") + "</span></h2>";
-  html += "<a href='/discovery_on' id='switchButton'>Switch ON Auto Discovery</a>";
-  html += "<a href='/discovery_off' id='switchButtonRed'>Switch OFF Auto Discovery</a>";
+  html += "<a href='/discovery_on' id='switchButton'>Add Device To HA</a>";
+  html += "<a href='/discovery_off' id='switchButtonRed'>Remove Device from HA</a>";
   html += "<h3>OTA Update</h3>";
   html += "<a href='/update' id='switchButton'>Update Firmware</a>";
   html += "</body></html>";
@@ -129,19 +118,6 @@ void handleState() {
   server.send(200, "text/plain", hubState);
 }
 
-void handleDiscoveryOn() {
-    delay(200);
-    auto_discovery = true;
-    haDiscovery();
-    server.send(200, "text/html", "<h1>Discovery ON...<h1><h3>Home Assistant MQTT Discovery enabled</h3><a href='/'>Back</a>");
-}
-
-void handleDiscoveryOff() {
-    delay(200);
-    auto_discovery = false;
-    haDiscovery();
-    server.send(200, "text/html", "<h1>Discovery OFF...<h1><h3>Home Assistant MQTT Discovery disabled. Previous entities removed.</h3><a href='/'>Back</a>");
-}
 
 unsigned long lastPrintTime = 0;
 void printWifiStatus() {
@@ -215,6 +191,18 @@ void elegantOTACallbackInit(void) {
 // =============================================================================
 // MQTT
 // =============================================================================
+
+byte macAddr[6];                  //Device MAC address
+char uidPrefix[] = "rctdev";      //Prefix for unique ID generation (limit to 20 chars)
+char devUniqueID[30];             //Generated Unique ID for this device (uidPrefix + last 6 MAC characters) 
+
+const char* mqtt_discovery_prefix = "homeassistant";
+const char* mqtt_device_name = "ugreen_usb_hub_switch";
+const char* mqtt_switch_topic = "home/usb_hub_switch/switch/set";
+const char* mqtt_state_topic = "home/usb_hub_switch/state";
+const char* mqtt_availability_topic = "stat/usb_hub_switch/availability";
+
+
 void createDiscoveryUniqueID() {
   //Generate UniqueID from uidPrefix + last 6 chars of device MAC address
   //This should insure that even multiple devices installed in same HA instance are unique
@@ -237,9 +225,9 @@ void haDiscovery() {
   char topic[128];
   if (auto_discovery) {
     char buffer1[512];
-    char buffer2[512];
+    // char buffer2[512];
     char uid[128];
-    DynamicJsonDocument doc(512);
+    DynamicJsonDocument doc(1024);
     doc.clear();
     Serial.println("Discovering new devices...");
 
@@ -248,64 +236,35 @@ void haDiscovery() {
     //Create unique topic based on devUniqueID
     strcpy(topic, "homeassistant/switch/");
     strcat(topic, devUniqueID);
-    strcat(topic, "S/config");
+    strcat(topic, "/config");
     //Create unique_id based on devUniqueID
     strcpy(uid, devUniqueID);
     strcat(uid, "S");
     //Create JSON payload per HA documentation
     doc["name"] = "Ugreen USB Hub Switch";
-    doc["object_id "] = "mqtt_ugreen_usb_hub_switch";
-    doc["unique_id"] = uid;
-    doc["state_topic"] = mqtt_state_topic;
-    doc["command_topic"] = mqtt_switch_topic;
-    doc["payload_on"] = "Mac";
-    doc["payload_off"] = "PC";
-    doc["state_on"] = "Mac";
-    doc["state_off"] = "PC";
+    doc["uniq_id"] = uid;
+    doc["stat_t"] = mqtt_state_topic;
+    doc["cmd_t"] = mqtt_switch_topic;
+    doc["pl_on"] = "Mac";
+    doc["pl_off"] = "PC";
+    doc["stat_on"] = "Mac";
+    doc["stat_off"] = "PC";
     doc["icon"] = "mdi:usb-port";
-    doc["device_class"] = "switch";
-    doc["initial_state"] = "PC";
+    doc["optimistic"] = false;
+    doc["retain"] = true;
     JsonObject device = doc.createNestedObject("device");
-    device["name"] = "My MQTT USB Hub Switch";
-    device["identifiers"] = "mymqttdevice01";
-    device["manufacturer "] = "Jacques' Technologies";
-    device["model"] = "Wemos S2 Mini ESP32";
-    device["configuration_url"] = "http://192.168.0.40";  //web interface for device, with discovery toggle
-    serializeJson(doc, buffer1);    
+    device["name"] = "MQTT USB Hub Switch";
+    device["ids"] = "mymqttdevice01";
+    device["mf"] = "DIY";
+    device["mdl"] = "ESP32";
+    serializeJson(doc, buffer1);   
     // Print to Serial for debugging
+    Serial.print("Content-Length: ");
+    Serial.println(measureJson(doc));
     Serial.println(buffer1);
+    Serial.println(topic);
     //Publish discovery topic and payload (with retained flag)
     pubsubClient.publish(topic, buffer1, true);    
-
-    
-    // USB STATE SENSOR
-    Serial.println("Adding USB State Sensor...");
-    //Create unique Topic based on devUniqueID
-    strcpy(topic, "homeassistant/sensor/");
-    strcat(topic, devUniqueID);
-    strcat(topic, "E/config");
-    //Create unique_id based on decUniqueID
-    strcpy(uid, devUniqueID);
-    strcat(uid, "E");
-    //Create JSON payload per HA documentation
-    doc.clear();
-    doc["name"] = "USB Hub State";
-    doc["object_id"] = "mqtt_ugreen_usb_hub_state";
-    doc["device_class"] = "enum";
-    doc["uniq_id"] = uid;
-    doc["state_topic"] = mqtt_state_topic;
-    doc["icon"] = "mdi:usb-port";
-    JsonObject deviceT = doc.createNestedObject("device");
-    deviceT["identifiers"] = "My MQTT USB Hub State";
-    deviceT["name"] = "My MQTT Device";
-    deviceT["manufacturer "] = "Jacques' Technologies";
-    deviceT["model"] = "Wemos S2 Mini ESP32";
-    deviceT["configuration_url "] = "http://192.168.0.40";  //web interface for device, with discovery toggle
-    serializeJson(doc, buffer2);
-    // Print to Serial for debugging
-    Serial.println(buffer2);
-    //Publish discovery topic and payload (with retained flag)
-    pubsubClient.publish(topic, buffer2, true);
    
     Serial.println("All devices added!");
 
@@ -315,17 +274,9 @@ void haDiscovery() {
     //Must use original topic, so recreate from original Unique ID
     //This will immediately remove/delete the device/entities from HA
     Serial.println("Removing discovered devices...");
-
-    //Temperature Sensor
-    strcpy(topic, "homeassistant/sensor/");
-    strcat(topic, devUniqueID);
-    strcat(topic, "E/config");
-    pubsubClient.publish(topic, "");
-
-    //Light (switch)
     strcpy(topic, "homeassistant/switch/");
     strcat(topic, devUniqueID);
-    strcat(topic, "S/config");
+    strcat(topic, "/config");
     pubsubClient.publish(topic, "");
 
     Serial.println("Devices Removed...");
@@ -337,12 +288,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
-  // Print to Serial for debugging
-  Serial.println(String(topic));
-  Serial.println(mqtt_switch_topic);
-  Serial.println(message);
+
+  // Switch the hub if the switch topic is received
   if (String(topic) == mqtt_switch_topic) {
+    if (message != hubState) {
       switchHub();
+    } 
   }
 }
 
@@ -350,10 +301,13 @@ void reconnect() {
   while (!pubsubClient.connected()) {
     Serial.print("Attempting MQTT connection...");
     String clientId = "USBHubSwitch-" + String(random(0xffff), HEX);
-    if (pubsubClient.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+    if (pubsubClient.connect(clientId.c_str(), mqtt_username, mqtt_password, mqtt_availability_topic, 0, true, "offline")) {
       Serial.println("connected");
       pubsubClient.subscribe(mqtt_switch_topic);
       pubsubClient.publish(mqtt_state_topic, hubState.c_str(), true);
+      pubsubClient.publish(mqtt_availability_topic, "online", true);
+      haDiscovery();
+      Serial.println("Subscribed to topic and published initial state");
     } else {
       Serial.print("failed, rc=");
       Serial.print(pubsubClient.state());
@@ -363,12 +317,23 @@ void reconnect() {
   }
 }
 
-static String lastPublishedState = "";
+
 void publishState() {
-  if (hubState != lastPublishedState) {
-    pubsubClient.publish(mqtt_state_topic, hubState.c_str(), true);
-    lastPublishedState = hubState;
-  }
+  pubsubClient.publish(mqtt_state_topic, hubState.c_str(), true);
+}
+
+void handleDiscoveryOn() {
+    delay(200);
+    auto_discovery = true;
+    haDiscovery();
+    server.send(200, "text/html", "<h1>Discovery ON...<h1><h3>Home Assistant MQTT Discovery enabled</h3><a href='/'>Back</a>");
+}
+
+void handleDiscoveryOff() {
+    delay(200);
+    auto_discovery = false;
+    haDiscovery();
+    server.send(200, "text/html", "<h1>Discovery OFF...<h1><h3>Home Assistant MQTT Discovery disabled. Previous entities removed.</h3><a href='/'>Back</a>");
 }
 
 
@@ -377,7 +342,7 @@ void publishState() {
 // =============================================================================
 
 const int MAX_WIFI_CONNECT_ATTEMPTS = 20;
-const int WIFI_RETRY_DELAY = 500; // milliseconds
+const int WIFI_RETRY_DELAY = 2000; // milliseconds
 
 void setup() {
   Serial.begin(115200);
@@ -402,11 +367,16 @@ void setup() {
     delay(WIFI_RETRY_DELAY);
     Serial.print(".");
     wifiConnectAttempts++;
-    
+
     if (wifiConnectAttempts >= MAX_WIFI_CONNECT_ATTEMPTS) {
       Serial.println("\nFailed to connect to WiFi. Please check your credentials or network status.");
       // You might want to implement a reset or alternative behavior here
-      while(1) { delay(1000); } // Infinite loop to prevent further execution
+      // Reset WiFi and try again
+      delay(10000);
+      wifiConnectAttempts = 0;
+      WiFi.disconnect();
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(ssid, password);
     }
   }
 
@@ -433,18 +403,22 @@ void setup() {
   server.on("/state", HTTP_GET, handleState);
 
   //Handle web callbacks for enabling or disabling discovery (using this method is just one of many ways to do this)
-  server.on("/discovery_on",HTTP_GET, handleDiscoveryOn);
+  server.on("/discovery_on", HTTP_GET, handleDiscoveryOn);
 
-  server.on("/discovery_off",HTTP_GET, handleDiscoveryOff);
+  server.on("/discovery_off", HTTP_GET, handleDiscoveryOff);
 
   // Start ElegantOTA
   ElegantOTA.begin(&server);    // Start ElegantOTA
   elegantOTACallbackInit();
   server.begin();
   pubsubClient.setServer(mqtt_broker, mqtt_port);
+  // Allow for larger payloads on MQTT
+  pubsubClient.setBufferSize(512);
   pubsubClient.setCallback(callback);
 }
 
+unsigned long lastStatePublish = 0;
+const unsigned long STATE_PUBLISH_INTERVAL = 60000;  // 1 minute
 void loop() {
   server.handleClient();
   ElegantOTA.loop();  
@@ -456,6 +430,11 @@ void loop() {
     reconnect();
   }
   pubsubClient.loop();
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastStatePublish >= STATE_PUBLISH_INTERVAL) {
+    publishState();
+    lastStatePublish = currentMillis;
+  }
   updateHubState();
   printWifiStatus();
   // blinkLED();

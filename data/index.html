@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UGreen USB Switch</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>UGreen USB Switch</h1>
+        <h2>Current IP: <span id="ipState"></span></h2>
+        <p>Current State: <span id="state"></span></p>
+        <button id="switchButton">Switch to <span id="switchTo"></span></button>
+        <h2>Auto Discovery: <span id="discoveryState"></span></h2>
+        <button id="discoveryOn">Add Device To HA</button>
+        <button id="discoveryOff">Remove Device from HA</button>
+        <h3>OTA Update</h3>
+        <a href="/update" class="button">Update Firmware</a>
+    </div>
+    <script src="/script.js"></script>
+</body>
+</html>

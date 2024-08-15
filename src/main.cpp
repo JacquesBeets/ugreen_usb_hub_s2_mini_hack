@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
+#include <SPIFFS.h>
 #include "config.h"
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
@@ -19,6 +20,11 @@ void setup() {
   pinMode(SWITCH_PIN, OUTPUT);
   digitalWrite(SWITCH_PIN, HIGH);
   pinMode(MONITOR_PIN, INPUT_PULLUP);
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An error has occurred while mounting SPIFFS");
+    return;
+  }
 
   setupWiFi();
   setupMQTT();

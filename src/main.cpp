@@ -196,7 +196,7 @@ void updateHubState() {
       lastSteadyState = currentState;
 
       if ((millis() - lastStateChangeTime) > STATE_CHANGE_THRESHOLD) {
-        String newState = (currentState == LOW) ? "PC" : "Mac";
+        String newState = (currentState == LOW) ? "Mac" : "PC";
         if (hubState != newState) {
           hubState = newState;
           lastStateChangeTime = millis();

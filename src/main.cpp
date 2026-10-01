@@ -20,6 +20,12 @@ char mqtt_port[6] = "1883";
 char mqtt_username[32] = "";
 char mqtt_password[32] = "";
 
+// Fixed STA network config (no DHCP reservation available)
+const IPAddress STATIC_IP(192, 168, 0, 92);
+const IPAddress STATIC_GATEWAY(192, 168, 0, 1);
+const IPAddress STATIC_SUBNET(255, 255, 255, 0);
+const IPAddress STATIC_DNS(192, 168, 0, 1);
+
 // Flag for saving config
 bool shouldSaveConfig = false;
 
@@ -58,11 +64,11 @@ int lastSteadyState = LOW;
 int lastFlickerableState = LOW;
 int currentState;
 
-// MQTT reconnect settings (non-blocking)
+// MQTT reconnect settings (non-blocking, exponential backoff 5 s -> 60 s)
 unsigned long lastMqttReconnectAttempt = 0;
-const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
-int mqttReconnectAttempts = 0;
-const int MAX_MQTT_RECONNECT_ATTEMPTS = 10;
+const unsigned long MQTT_BACKOFF_MIN = 5000;
+const unsigned long MQTT_BACKOFF_MAX = 60000;
+unsigned long mqttBackoff = MQTT_BACKOFF_MIN;
 
 // State publish interval
 unsigned long lastStatePublish = 0;
@@ -275,10 +281,38 @@ void handleRoot() {
   server.send(200, "text/html", html);
 }
 
+// GET /switch            -> toggle, 303 redirect to UI (web UI button relies on this)
+// GET /switch?to=Mac|PC   -> switch only if not already on target, 200 text/plain state
 void handleSwitch() {
-  switchHub();
-  server.sendHeader("Location", "/");
-  server.send(303);
+  if (!server.hasArg("to")) {
+    switchHub();
+    server.sendHeader("Location", "/");
+    server.send(303);
+    return;
+  }
+
+  String to = server.arg("to");
+  String target;
+  if (to.equalsIgnoreCase("Mac")) {
+    target = "Mac";
+  } else if (to.equalsIgnoreCase("PC")) {
+    target = "PC";
+  } else {
+    server.send(400, "text/plain", "Invalid 'to' value, expected Mac or PC");
+    return;
+  }
+
+  updateHubState();
+  if (target != hubState) {  // same rule as the MQTT set handler
+    switchHub();
+    // Let the debounce in updateHubState() settle so the response reflects the new state
+    unsigned long start = millis();
+    while (hubState != target && millis() - start < 300) {
+      delay(10);
+      updateHubState();
+    }
+  }
+  server.send(200, "text/plain", hubState);
 }
 
 void handleState() {
@@ -449,12 +483,12 @@ bool mqttReconnect() {
       haDiscovery();
     }
 
-    mqttReconnectAttempts = 0;
+    mqttBackoff = MQTT_BACKOFF_MIN;
     return true;
   } else {
     Serial.print("MQTT connection failed, rc=");
     Serial.println(pubsubClient.state());
-    mqttReconnectAttempts++;
+    mqttBackoff = min(mqttBackoff * 2, MQTT_BACKOFF_MAX);
     return false;
   }
 }
@@ -493,6 +527,9 @@ void setupWiFiManager() {
 
   // Set minimum signal quality
   wifiManager.setMinimumSignalQuality(20);
+
+  // Static STA IP; the config portal AP keeps its default 192.168.4.1
+  wifiManager.setSTAStaticIPConfig(STATIC_IP, STATIC_GATEWAY, STATIC_SUBNET, STATIC_DNS);
 
   // Try to connect, if it fails start config portal
   Serial.println("Connecting to WiFi...");
@@ -581,6 +618,10 @@ void setup() {
   Serial.println("HTTP server started");
 
   // Setup MQTT
+  // Bound blocking while the broker is down: WiFiClient::connect(ip, port) uses _timeout
+  // (set here to 1000 ms) for its select(); socket timeout bounds the CONNACK wait.
+  espClient.setTimeout(1);
+  pubsubClient.setSocketTimeout(1);
   pubsubClient.setServer(mqtt_broker, atoi(mqtt_port));
   pubsubClient.setBufferSize(512);
   pubsubClient.setCallback(mqttCallback);
@@ -608,17 +649,9 @@ void loop() {
   // Non-blocking MQTT reconnect
   if (!pubsubClient.connected()) {
     unsigned long now = millis();
-    if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+    if (now - lastMqttReconnectAttempt >= mqttBackoff) {
       lastMqttReconnectAttempt = now;
-
-      if (mqttReconnectAttempts < MAX_MQTT_RECONNECT_ATTEMPTS) {
-        mqttReconnect();
-      } else {
-        // After max attempts, slow down retries to every 30 seconds
-        if (now - lastMqttReconnectAttempt > 30000) {
-          mqttReconnectAttempts = 0; // Reset to try again
-        }
-      }
+      mqttReconnect();
     }
   } else {
     pubsubClient.loop();

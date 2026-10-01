@@ -37,6 +37,8 @@ A DIY smart USB switch built with a Lolin S2 Mini (ESP32-S2) that allows switchi
 
 Once connected, access the device at its IP address or hostname:
 
+The device uses a fixed IP of `192.168.0.92` (gateway/DNS `192.168.0.1`, subnet `255.255.255.0`), set in `src/main.cpp`.
+
 | Endpoint | Description |
 |----------|-------------|
 | `http://<device-ip>/` | Main web UI - status, switch control, HA discovery |
@@ -44,6 +46,7 @@ Once connected, access the device at its IP address or hostname:
 | `http://<device-ip>/reset` | Reset WiFi/MQTT config and restart in AP mode |
 | `http://<device-ip>/state` | Get current state (PC/Mac) as plain text |
 | `http://<device-ip>/switch` | Toggle the switch |
+| `http://<device-ip>/switch?to=Mac` | Switch to a specific host (`Mac` or `PC`, case-insensitive); no-op if already there. Returns the resulting state as plain text, 400 on invalid value |
 | `http://<device-ip>/discovery_on` | Enable Home Assistant MQTT discovery |
 | `http://<device-ip>/discovery_off` | Remove device from Home Assistant |
 

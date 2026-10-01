@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <WiFiManager.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
@@ -368,6 +369,9 @@ void handleDiag() {
   out += "mqtt_backoff_ms=" + String(mqttBackoff) + "\n";
   out += "mqtt_connected=" + String(pubsubClient.connected() ? 1 : 0) + "\n";
   out += "wifi_sleep=" + String(WiFi.getSleep() ? 1 : 0) + "\n";
+  uint16_t inactiveSec = 0;
+  esp_wifi_get_inactive_time(WIFI_IF_STA, &inactiveSec);
+  out += "inactive_time_s=" + String(inactiveSec) + "\n";
   out += "disconnects=" + String(disconnectCount) + "\n";
   out += "last_manual_reconnect_ms=" + String(lastManualReconnectMs) + "\n";
   WifiEvt snap[8]; uint8_t head, count;
@@ -678,6 +682,9 @@ void setup() {
   // WiFi robustness: no modem sleep (avoid missed beacons -> reason 200), let the core auto-reconnect.
   // WiFi.persistent() is left as is: WiFiManager already resets it to false after saving credentials.
   WiFi.setSleep(false);
+  // Tolerate up to 30 s without beacons (default 6 s) so short interference bursts don't drop the STA
+  esp_err_t inactiveErr = esp_wifi_set_inactive_time(WIFI_IF_STA, 30);
+  Serial.printf("esp_wifi_set_inactive_time(STA, 30) -> %d (%s)\n", inactiveErr, esp_err_to_name(inactiveErr));
   WiFi.setAutoReconnect(true);
 
   // Get MAC address and create unique ID

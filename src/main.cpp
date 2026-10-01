@@ -315,6 +315,75 @@ void handleSwitch() {
   server.send(200, "text/plain", hubState);
 }
 
+// --- Diagnostics: boot counter (survives SW reset) + ring of recent WiFi events ---
+RTC_NOINIT_ATTR uint32_t bootMagic;
+RTC_NOINIT_ATTR uint32_t bootCount;
+const uint32_t BOOT_MAGIC = 0xB007C0DE;
+struct WifiEvt { uint32_t ms; uint16_t id; uint16_t reason; };
+WifiEvt wifiEvents[8];
+uint8_t wifiEvtHead = 0, wifiEvtCount = 0;
+portMUX_TYPE wifiEvtMux = portMUX_INITIALIZER_UNLOCKED;
+volatile uint32_t lastDisconnectMs = 0;   // millis() of last STA_DISCONNECTED (same value as ring entry)
+volatile uint32_t disconnectCount = 0;
+unsigned long lastManualReconnectMs = 0;
+const unsigned long WIFI_RECONNECT_GRACE = 30000;
+
+void onWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+  uint16_t reason = (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) ? info.wifi_sta_disconnected.reason : 0;
+  portENTER_CRITICAL(&wifiEvtMux);
+  wifiEvents[wifiEvtHead] = {millis(), (uint16_t)event, reason};
+  wifiEvtHead = (wifiEvtHead + 1) % 8;
+  if (wifiEvtCount < 8) wifiEvtCount++;
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    lastDisconnectMs = wifiEvents[(wifiEvtHead + 7) % 8].ms;
+    disconnectCount++;
+  }
+  portEXIT_CRITICAL(&wifiEvtMux);
+}
+
+const char* resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "POWERON";   case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";             case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";   case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";           case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT"; case ESP_RST_SDIO: return "SDIO";
+    default: return "UNKNOWN";
+  }
+}
+
+void handleDiag() {
+  String out;
+  out += "uptime_ms=" + String(millis()) + "\n";
+  out += "boot_count=" + String(bootCount) + "\n";
+  out += "reset_reason=" + String(resetReasonStr(esp_reset_reason())) + "\n";
+  out += "wifi_status=" + String((int)WiFi.status()) + "\n";
+  out += "ip=" + WiFi.localIP().toString() + "\n";
+  out += "rssi=" + String(WiFi.RSSI()) + "\n";
+  out += "free_heap=" + String(ESP.getFreeHeap()) + "\n";
+  out += "min_free_heap=" + String(ESP.getMinFreeHeap()) + "\n";
+  out += "monitor_pin_raw=" + String(digitalRead(monitorPin)) + "\n";
+  out += "hub_state=" + hubState + "\n";
+  out += "switch_pin_raw=" + String(digitalRead(switchPin)) + "\n";
+  out += "mqtt_backoff_ms=" + String(mqttBackoff) + "\n";
+  out += "mqtt_connected=" + String(pubsubClient.connected() ? 1 : 0) + "\n";
+  out += "wifi_sleep=" + String(WiFi.getSleep() ? 1 : 0) + "\n";
+  out += "disconnects=" + String(disconnectCount) + "\n";
+  out += "last_manual_reconnect_ms=" + String(lastManualReconnectMs) + "\n";
+  WifiEvt snap[8]; uint8_t head, count;
+  portENTER_CRITICAL(&wifiEvtMux);
+  memcpy(snap, wifiEvents, sizeof(snap)); head = wifiEvtHead; count = wifiEvtCount;
+  portEXIT_CRITICAL(&wifiEvtMux);
+  out += "wifi_events=";
+  for (uint8_t i = 0; i < count; i++) {
+    const WifiEvt& e = snap[(head + 8 - count + i) % 8];
+    if (i) out += ",";
+    out += String(e.ms) + ":" + String(e.id) + ":" + String(e.reason);
+  }
+  out += "\n";
+  server.send(200, "text/plain", out);
+}
+
 void handleState() {
   updateHubState();
   server.send(200, "text/plain", hubState);
@@ -577,6 +646,14 @@ void printWifiStatus() {
 
 void setup() {
   Serial.begin(115200);
+
+  // Diagnostics: boot counter (magic check -> power-on starts at 1) and WiFi event log
+  if (bootMagic != BOOT_MAGIC) { bootMagic = BOOT_MAGIC; bootCount = 0; }
+  bootCount++;
+  WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_CONNECTED);
+  WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  WiFi.onEvent(onWifiEvent, ARDUINO_EVENT_WIFI_STA_LOST_IP);
   delay(1000);
   Serial.println("\n\n=== UGreen USB Hub Switch ===\n");
 
@@ -586,11 +663,22 @@ void setup() {
   digitalWrite(switchPin, HIGH);
   pinMode(monitorPin, INPUT_PULLUP);
 
+  // Seed hub state from the pin so a boot on the Mac side is reported correctly
+  currentState = digitalRead(monitorPin);
+  lastSteadyState = currentState;
+  lastFlickerableState = currentState;
+  hubState = (currentState == LOW) ? "Mac" : "PC";
+
   // Load saved configuration
   loadConfig();
 
   // Setup WiFi with manager
   setupWiFiManager();
+
+  // WiFi robustness: no modem sleep (avoid missed beacons -> reason 200), let the core auto-reconnect.
+  // WiFi.persistent() is left as is: WiFiManager already resets it to false after saving credentials.
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
 
   // Get MAC address and create unique ID
   WiFi.macAddress(macAddr);
@@ -606,6 +694,7 @@ void setup() {
   server.on("/discovery_on", HTTP_GET, handleDiscoveryOn);
   server.on("/discovery_off", HTTP_GET, handleDiscoveryOff);
   server.on("/reset", HTTP_GET, handleReset);
+  server.on("/diag", HTTP_GET, handleDiag);
 
   // Setup ElegantOTA
   ElegantOTA.begin(&server);
@@ -638,16 +727,21 @@ void loop() {
   server.handleClient();
   ElegantOTA.loop();
 
-  // Check WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection lost. Reconnecting...");
-    WiFi.reconnect();
-    delay(1000);
-    return;
+  // WiFi down: let auto-reconnect work; only nudge once per 30 s, 30 s after the last disconnect.
+  bool wifiUp = (WiFi.status() == WL_CONNECTED);
+  if (!wifiUp) {
+    unsigned long now = millis();
+    if (now - lastDisconnectMs >= WIFI_RECONNECT_GRACE && now - lastManualReconnectMs >= WIFI_RECONNECT_GRACE) {
+      Serial.println("WiFi still down, calling WiFi.reconnect()");
+      WiFi.reconnect();
+      lastManualReconnectMs = now;
+    }
   }
 
-  // Non-blocking MQTT reconnect
-  if (!pubsubClient.connected()) {
+  // Non-blocking MQTT reconnect (only while WiFi is up)
+  if (!wifiUp) {
+    // skip MQTT entirely
+  } else if (!pubsubClient.connected()) {
     unsigned long now = millis();
     if (now - lastMqttReconnectAttempt >= mqttBackoff) {
       lastMqttReconnectAttempt = now;
